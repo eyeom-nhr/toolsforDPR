@@ -1,6 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import { db, firebaseError } from './firebaseConfig'
-import { ref, set, onValue, remove } from 'firebase/database'
 
 /* ═══════════ UTILS ═══════════ */
 const ytId = (url) => {
@@ -14,16 +12,8 @@ const embedUrl = (id) => `https://www.youtube-nocookie.com/embed/${id}?autoplay=
 
 /* ═══════════ TOURNAMENT CONFIG ═══════════ */
 function getConfig(size) {
-  if (size === 8) return {
-    rounds: ['8강', '4강', '결승'],
-    bounds: [0, 4, 6, 7],
-    total: 7, entryCount: 8,
-  }
-  return {
-    rounds: ['16강', '8강', '4강', '결승'],
-    bounds: [0, 8, 12, 14, 15],
-    total: 15, entryCount: 16,
-  }
+  if (size === 8) return { rounds: ['8강', '4강', '결승'], bounds: [0, 4, 6, 7], total: 7 }
+  return { rounds: ['16강', '8강', '4강', '결승'], bounds: [0, 8, 12, 14, 15], total: 15 }
 }
 
 function getRound(i, bounds) {
@@ -50,28 +40,18 @@ function shuffle(a) {
 }
 
 function buildMatches(vids, totalMatches) {
-  const firstRound = vids.length / 2
+  const first = vids.length / 2
   return Array.from({ length: totalMatches }, (_, i) => ({
-    id: i,
-    v1: i < firstRound ? vids[i * 2] : null,
-    v2: i < firstRound ? vids[i * 2 + 1] : null,
+    id: i, v1: i < first ? vids[i * 2] : null, v2: i < first ? vids[i * 2 + 1] : null,
     winner: null, s1: 0, s2: 0,
   }))
 }
 
-/* ═══════════ USER ID ═══════════ */
-function getUserId() {
-  let id = localStorage.getItem('vwc_uid')
-  if (!id) {
-    id = Math.random().toString(36).slice(2) + Date.now().toString(36)
-    localStorage.setItem('vwc_uid', id)
-  }
-  return id
-}
-
-/* ═══════════ FIREBASE ═══════════ */
-const fbSet = async (path, val) => { if (!db) return; try { await set(ref(db, path), val) } catch (e) { console.error(e) } }
-const fbRemove = async (path) => { if (!db) return; try { await remove(ref(db, path)) } catch (e) { console.error(e) } }
+/* ═══════════ PERSISTENCE ═══════════ */
+const LS = 'vwc'
+const save = (t) => { try { localStorage.setItem(LS, JSON.stringify(t)) } catch {} }
+const load = () => { try { const s = localStorage.getItem(LS); return s ? JSON.parse(s) : null } catch { return null } }
+const clear = () => { try { localStorage.removeItem(LS) } catch {} }
 
 /* ═══════════ CONFETTI ═══════════ */
 function Confetti() {
@@ -109,58 +89,40 @@ function Modal({ message, onConfirm, onCancel }) {
 /* ═══════════ BULK PASTE ═══════════ */
 function BulkModal({ onApply, onClose }) {
   const [text, setText] = useState('')
-  const parse = () => {
-    const lines = text.trim().split('\n').filter(Boolean)
-    onApply(lines.map(line => {
-      const p = line.split('|').map(s => s.trim())
-      return { url: p[0] || '', title: p[1] || '', artist: p[2] || '', desc: p[3] || '', rec: p[4] || '' }
-    }))
-  }
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box modal-wide" onClick={e => e.stopPropagation()}>
         <h3 className="modal-title">한번에 붙여넣기</h3>
         <p className="modal-hint">한 줄에 하나씩: URL | 제목 | 아티스트 | 소개 | 추천인</p>
         <textarea className="modal-textarea" value={text} onChange={e => setText(e.target.value)}
-          placeholder={"https://youtube.com/watch?v=abc | Bohemian Rhapsody | Queen | 전설의 기타 솔로 | 홍길동\nhttps://youtu.be/xyz | Hotel California | Eagles"} />
+          placeholder={"https://youtube.com/watch?v=abc | Bohemian Rhapsody | Queen | 기타 솔로 | 홍길동\nhttps://youtu.be/xyz | Hotel California | Eagles"} />
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={onClose}>취소</button>
-          <button className="btn btn-gold" onClick={parse}>적용</button>
+          <button className="btn btn-gold" onClick={() => {
+            const lines = text.trim().split('\n').filter(Boolean)
+            onApply(lines.map(l => {
+              const p = l.split('|').map(s => s.trim())
+              return { url: p[0]||'', title: p[1]||'', artist: p[2]||'', desc: p[3]||'', rec: p[4]||'' }
+            }))
+          }}>적용</button>
         </div>
       </div>
     </div>
   )
 }
 
-/* ═══════════ SHARE LINK BANNER ═══════════ */
-function ShareBanner() {
-  const [copied, setCopied] = useState(false)
-  const link = window.location.origin + window.location.pathname
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(link)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      prompt('이 링크를 복사하세요:', link)
-    }
-  }
-
+/* ═══════════ BRACKET ═══════════ */
+function BkEntry({ v, votes, win, lose }) {
+  if (!v) return <div className="bk-entry bk-tbd"><span className="bk-name">—</span></div>
   return (
-    <div className="share-banner">
-      <span className="share-text">참여자들에게 아래 링크를 공유하세요</span>
-      <div className="share-row">
-        <code className="share-link">{link}</code>
-        <button className="btn btn-gold btn-sm" onClick={copy}>
-          {copied ? '복사됨!' : '링크 복사'}
-        </button>
-      </div>
+    <div className={`bk-entry ${win ? 'bk-win' : lose ? 'bk-lose' : ''}`}>
+      {v.videoId && <img className="bk-thumb" src={thumb(v.videoId)} alt="" loading="lazy" />}
+      <span className="bk-name">{v.title}{v.artist ? ` — ${v.artist}` : ''}</span>
+      {votes != null && <span className="bk-votes">{votes}</span>}
     </div>
   )
 }
 
-/* ═══════════ BRACKET ═══════════ */
 function Bracket({ matches, videos, config }) {
   const fv = v => v ? videos.find(x => x.id === v.id) : null
   return (
@@ -186,39 +148,19 @@ function Bracket({ matches, videos, config }) {
   )
 }
 
-function BkEntry({ v, votes, win, lose }) {
-  if (!v) return <div className="bk-entry bk-tbd"><span className="bk-name">—</span></div>
-  return (
-    <div className={`bk-entry ${win ? 'bk-win' : lose ? 'bk-lose' : ''}`}>
-      {v.videoId && <img className="bk-thumb" src={thumb(v.videoId)} alt="" loading="lazy" />}
-      <span className="bk-name">{v.title}{v.artist ? ` — ${v.artist}` : ''}</span>
-      {votes != null && <span className="bk-votes">{votes}</span>}
-    </div>
-  )
-}
-
 /* ═══════════ SETUP ═══════════ */
 function Setup({ onStart }) {
   const [title, setTitle] = useState('')
   const [size, setSize] = useState(16)
-  const [vc, setVc] = useState(4)
+  const [vc, setVc] = useState(1)
   const [playMode, setPlayMode] = useState('inline')
   const [entries, setEntries] = useState(Array.from({ length: 16 }, () => ({ url: '', title: '', artist: '', desc: '', rec: '' })))
   const [showBulk, setShowBulk] = useState(false)
 
-  const visibleEntries = entries.slice(0, size)
+  const visible = entries.slice(0, size)
   const upd = (i, f, v) => setEntries(p => { const n = [...p]; n[i] = { ...n[i], [f]: v }; return n })
-  const filled = visibleEntries.filter(e => e.url && ytId(e.url) && e.title.trim()).length
+  const filled = visible.filter(e => e.url && ytId(e.url) && e.title.trim()).length
   const ok = title.trim() && filled === size
-
-  const applyBulk = parsed => {
-    setEntries(prev => {
-      const next = [...prev]
-      parsed.forEach((p, i) => { if (i < size) next[i] = { ...next[i], ...p } })
-      return next
-    })
-    setShowBulk(false)
-  }
 
   return (
     <div>
@@ -243,8 +185,8 @@ function Setup({ onStart }) {
         </div>
         <div className="setup-field">
           <label className="label">투표 인원</label>
-          <input type="number" className="input-box" min={1} max={30} value={vc}
-            onChange={e => setVc(Math.max(1, Math.min(30, +e.target.value || 1)))} />
+          <input type="number" className="input-box" min={1} max={20} value={vc}
+            onChange={e => setVc(Math.max(1, Math.min(20, +e.target.value || 1)))} />
         </div>
         <div className="setup-field">
           <label className="label">영상 재생</label>
@@ -267,7 +209,7 @@ function Setup({ onStart }) {
       </div>
 
       <div className="entry-list">
-        {visibleEntries.map((e, i) => {
+        {visible.map((e, i) => {
           const vid = ytId(e.url)
           return (
             <div className={`entry ${vid && e.title ? 'is-filled' : ''}`} key={i}>
@@ -289,7 +231,7 @@ function Setup({ onStart }) {
 
       <div className="cta-row">
         <button className="btn btn-gold btn-lg" disabled={!ok} onClick={() => {
-          const vids = visibleEntries.map((e, i) => ({
+          const vids = visible.map((e, i) => ({
             id: i, url: e.url, title: e.title.trim(), artist: e.artist.trim(),
             desc: e.desc, rec: e.rec, videoId: ytId(e.url),
           }))
@@ -299,20 +241,22 @@ function Setup({ onStart }) {
         </button>
       </div>
 
-      {showBulk && <BulkModal onApply={applyBulk} onClose={() => setShowBulk(false)} />}
+      {showBulk && <BulkModal onApply={parsed => {
+        setEntries(prev => {
+          const next = [...prev]
+          parsed.forEach((p, i) => { if (i < size) next[i] = { ...next[i], ...p } })
+          return next
+        })
+        setShowBulk(false)
+      }} onClose={() => setShowBulk(false)} />}
     </div>
   )
 }
 
 /* ═══════════ MATCH CARD ═══════════ */
-function Card({ video, myVoted, count, total, revealed, isWin, isLose, onVote, locked, playMode, voterCount }) {
+function Card({ video, count, revealed, isWin, isLose, onVote, disabled, playMode, showTurn, voterCount, total }) {
   const [playing, setPlaying] = useState(false)
   const vid = video?.videoId
-  const handleMedia = () => {
-    if (!vid) return
-    if (playMode === 'outlink') window.open(ytUrl(vid), '_blank')
-    else setPlaying(true)
-  }
   useEffect(() => { setPlaying(false) }, [video?.id])
 
   return (
@@ -320,7 +264,11 @@ function Card({ video, myVoted, count, total, revealed, isWin, isLose, onVote, l
       {playing && vid ? (
         <div className="card-embed"><iframe src={embedUrl(vid)} allow="autoplay; encrypted-media" allowFullScreen /></div>
       ) : (
-        <div className="card-media" onClick={handleMedia}>
+        <div className="card-media" onClick={() => {
+          if (!vid) return
+          if (playMode === 'outlink') window.open(ytUrl(vid), '_blank')
+          else setPlaying(true)
+        }}>
           {vid ? (
             <>
               <img src={thumb(vid)} alt={video?.title || ''} />
@@ -342,10 +290,10 @@ function Card({ video, myVoted, count, total, revealed, isWin, isLose, onVote, l
         </div>
       ) : (
         <div className="card-action">
-          {myVoted ? (
+          {showTurn ? (
             <div className="vote-done">투표 완료 · {total}/{voterCount}</div>
           ) : (
-            <button className="vote-btn" onClick={onVote} disabled={locked}>Vote</button>
+            <button className="vote-btn" onClick={onVote} disabled={disabled}>Vote</button>
           )}
         </div>
       )}
@@ -354,57 +302,55 @@ function Card({ video, myVoted, count, total, revealed, isWin, isLose, onVote, l
 }
 
 /* ═══════════ MATCH SCREEN ═══════════ */
-function MatchScreen({ tournament, uid, isHost, onAdvance, onReset }) {
-  const { matches, currentMatch: ci, title: tTitle, voterCount, playMode, size } = tournament
+function MatchScreen({ tournament, onAdvance, onReset }) {
+  const { matches, currentMatch: ci, voterCount, playMode, size } = tournament
   const config = getConfig(size || 16)
   const match = matches[ci]
 
-  const [votes, setVotes] = useState({})
+  const [s1, setS1] = useState(0)
+  const [s2, setS2] = useState(0)
   const [revealed, setRevealed] = useState(false)
+  const [justVoted, setJustVoted] = useState(null)
+  const [voteLock, setVoteLock] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
 
   useEffect(() => {
-    setRevealed(false)
-    if (!db) return
-    const unsub = onValue(ref(db, `votes/match_${ci}`), snap => setVotes(snap.val() || {}))
-    return () => unsub()
+    setS1(0); setS2(0); setRevealed(false); setJustVoted(null); setVoteLock(false)
   }, [ci])
 
-  const myVote = votes[uid] || null
-  const voters = Object.keys(votes)
-  const cnt1 = voters.filter(k => votes[k] === match.v1?.id).length
-  const cnt2 = voters.filter(k => votes[k] === match.v2?.id).length
-  const total = voters.length
+  const total = s1 + s2
   const allIn = total >= voterCount
 
   useEffect(() => {
     if (allIn && !revealed) {
-      const t = setTimeout(() => setRevealed(true), 800)
+      const t = setTimeout(() => setRevealed(true), voterCount > 1 ? 800 : 400)
       return () => clearTimeout(t)
     }
-  }, [allIn, revealed])
+  }, [allIn, revealed, voterCount])
 
-  const castVote = async (videoId) => {
-    if (myVote) return
-    await fbSet(`votes/match_${ci}/${uid}`, videoId)
+  const castVote = (side) => {
+    if (voteLock || allIn) return
+    setVoteLock(true)
+    setJustVoted(side)
+    if (side === 1) setS1(p => p + 1); else setS2(p => p + 1)
+    setTimeout(() => { setJustVoted(null); setVoteLock(false) }, voterCount > 1 ? 900 : 200)
   }
 
-  const isTie = revealed && cnt1 === cnt2
-  const winner = cnt1 > cnt2 ? 1 : cnt1 < cnt2 ? 2 : null
+  const isTie = revealed && s1 === s2
+  const winner = s1 > s2 ? 1 : s1 < s2 ? 2 : null
 
   const ri = getRound(ci, config.bounds)
   const rStart = config.bounds[ri]
   const rEnd = config.bounds[ri + 1]
+  const showTurn = voterCount > 1 && !revealed && justVoted !== null
 
   return (
     <div>
       <header className="hd">
         <span className="hd-tag">Video World Cup</span>
-        <h1 className="hd-title-sm">{tTitle}</h1>
-        {isHost && <button className="hd-reset" onClick={() => setConfirmReset(true)}>Exit</button>}
+        <h1 className="hd-title-sm">{tournament.title}</h1>
+        <button className="hd-reset" onClick={() => setConfirmReset(true)}>Exit</button>
       </header>
-
-      {isHost && <ShareBanner />}
 
       <div className="round-hd">
         <span className="round-label">Round</span>
@@ -414,48 +360,44 @@ function MatchScreen({ tournament, uid, isHost, onAdvance, onReset }) {
 
       <div className="progress"><div className="progress-bar" style={{ width: ((ci + 1) / config.total) * 100 + '%' }} /></div>
 
-      <div className="vote-info">
-        <span>{total}<em>/{voterCount}</em> voted</span>
-        {isHost && !allIn && total > 0 && !revealed && (
-          <button className="btn btn-ghost btn-sm" onClick={() => setRevealed(true)}>마감</button>
-        )}
-      </div>
-
-      <div className="match-grid">
-        <Card video={match.v1} myVoted={myVote === match.v1?.id} count={cnt1} total={total}
-          revealed={revealed} isWin={revealed && winner === 1} isLose={revealed && winner === 2}
-          onVote={() => castVote(match.v1?.id)} locked={!!myVote || allIn}
-          playMode={playMode} voterCount={voterCount} />
-        <div className="vs"><span>VS</span></div>
-        <Card video={match.v2} myVoted={myVote === match.v2?.id} count={cnt2} total={total}
-          revealed={revealed} isWin={revealed && winner === 2} isLose={revealed && winner === 1}
-          onVote={() => castVote(match.v2?.id)} locked={!!myVote || allIn}
-          playMode={playMode} voterCount={voterCount} />
-      </div>
-
-      {isTie && isHost && (
-        <div className="match-cta">
-          <p className="tie-msg">동점 — 재투표가 필요합니다</p>
-          <button className="btn btn-gold" onClick={async () => { setRevealed(false); await fbRemove(`votes/match_${ci}`) }}>Revote</button>
+      {voterCount > 1 && (
+        <div className="vote-info">
+          <span>{total}<em>/{voterCount}</em> voted</span>
+          {!allIn && total > 0 && !revealed && !justVoted && (
+            <button className="btn btn-ghost btn-sm" onClick={() => setRevealed(true)}>마감</button>
+          )}
         </div>
       )}
-      {isTie && !isHost && (
-        <div className="match-cta"><p className="tie-msg">동점 — 호스트가 재투표를 시작합니다</p></div>
+
+      <div className="match-grid">
+        <Card video={match.v1} count={s1} revealed={revealed}
+          isWin={revealed && winner === 1} isLose={revealed && winner === 2}
+          onVote={() => castVote(1)} disabled={voteLock || allIn}
+          playMode={playMode} showTurn={showTurn} voterCount={voterCount} total={total} />
+        <div className="vs"><span>VS</span></div>
+        <Card video={match.v2} count={s2} revealed={revealed}
+          isWin={revealed && winner === 2} isLose={revealed && winner === 1}
+          onVote={() => castVote(2)} disabled={voteLock || allIn}
+          playMode={playMode} showTurn={showTurn} voterCount={voterCount} total={total} />
+      </div>
+
+      {isTie && (
+        <div className="match-cta">
+          <p className="tie-msg">동점 — 재투표가 필요합니다</p>
+          <button className="btn btn-gold" onClick={() => {
+            setS1(0); setS2(0); setRevealed(false); setJustVoted(null); setVoteLock(false)
+          }}>Revote</button>
+        </div>
       )}
 
-      {revealed && !isTie && isHost && (
+      {revealed && !isTie && (
         <div className="match-cta">
-          <button className="btn btn-gold btn-lg" onClick={async () => {
-            const wId = winner === 1 ? match.v1?.id : match.v2?.id
-            await fbRemove(`votes/match_${ci}`)
-            onAdvance(ci, wId, cnt1, cnt2)
+          <button className="btn btn-gold btn-lg" onClick={() => {
+            onAdvance(ci, winner === 1 ? match.v1?.id : match.v2?.id, s1, s2)
           }}>
             {ci === config.total - 1 ? 'Final Result' : ci + 1 === rEnd ? `${config.rounds[ri + 1]} →` : 'Next Match →'}
           </button>
         </div>
-      )}
-      {revealed && !isTie && !isHost && (
-        <div className="match-cta"><p style={{ color: 'var(--tx3)', fontSize: 13 }}>호스트가 다음 경기를 진행합니다</p></div>
       )}
 
       {confirmReset && (
@@ -466,7 +408,7 @@ function MatchScreen({ tournament, uid, isHost, onAdvance, onReset }) {
 }
 
 /* ═══════════ TRANSITION ═══════════ */
-function Transition({ tournament, isHost, onContinue }) {
+function Transition({ tournament, onContinue }) {
   const config = getConfig(tournament.size || 16)
   const nr = tournament.nextRound || 1
   return (
@@ -474,9 +416,7 @@ function Transition({ tournament, isHost, onContinue }) {
       <div className="trans">
         <span className="trans-label">Next Round</span>
         <h2 className="trans-name">{config.rounds[nr]}</h2>
-        {isHost
-          ? <button className="btn btn-gold btn-lg" onClick={onContinue}>Continue →</button>
-          : <p style={{ color: 'var(--tx3)', fontSize: 13 }}>호스트가 다음 라운드를 시작합니다</p>}
+        <button className="btn btn-gold btn-lg" onClick={onContinue}>Continue →</button>
       </div>
       <hr className="rule" />
       <Bracket matches={tournament.matches} videos={tournament.videos} config={config} />
@@ -485,7 +425,7 @@ function Transition({ tournament, isHost, onContinue }) {
 }
 
 /* ═══════════ RESULT ═══════════ */
-function Result({ winner, tournament, isHost, onReset }) {
+function Result({ winner, tournament, onReset }) {
   const vid = winner?.videoId
   const config = getConfig(tournament.size || 16)
   return (
@@ -500,7 +440,7 @@ function Result({ winner, tournament, isHost, onReset }) {
         {vid && <img className="result-hero" src={thumb(vid)} alt={winner.title} />}
         <div className="cta-row">
           {vid && <button className="btn btn-ghost" onClick={() => window.open(ytUrl(vid), '_blank')}>Watch on YouTube</button>}
-          {isHost && <button className="btn btn-gold" onClick={onReset}>New World Cup</button>}
+          <button className="btn btn-gold" onClick={onReset}>New World Cup</button>
         </div>
       </div>
       <hr className="rule" />
@@ -510,55 +450,24 @@ function Result({ winner, tournament, isHost, onReset }) {
   )
 }
 
-/* ═══════════ WAITING SCREEN (for non-hosts) ═══════════ */
-function Waiting() {
-  return (
-    <div className="waiting">
-      <span className="hd-tag">Video World Cup</span>
-      <h2 style={{ fontFamily: 'var(--serif)', fontSize: 28, marginTop: 12 }}>월드컵 준비 중</h2>
-      <p style={{ color: 'var(--tx3)', marginTop: 8, fontSize: 14 }}>호스트가 월드컵을 만들고 있습니다.<br />잠시만 기다려주세요.</p>
-      <div className="spinner" style={{ marginTop: 24 }} />
-    </div>
-  )
-}
-
 /* ═══════════════════════════════════
    APP
    ═══════════════════════════════════ */
 export default function App() {
-  const [tournament, setTournament] = useState(null)
-  const [ready, setReady] = useState(false)
-  const uid = useRef(getUserId()).current
+  const [tournament, setTournament] = useState(() => load())
 
-  // Listen to tournament state
-  useEffect(() => {
-    if (!db) { setReady(true); return }
-    const unsub = onValue(ref(db, 'tournament'), snap => {
-      setTournament(snap.val() || null)
-      setReady(true)
-    })
-    return () => unsub()
-  }, [])
+  const persist = (t) => { setTournament(t); save(t) }
 
-  const isHost = tournament ? tournament.hostId === uid : true
-
-  const saveTournament = async (t) => {
-    setTournament(t)
-    await fbSet('tournament', t)
-  }
-
-  const handleStart = async ({ title, videos, voterCount, playMode, size }) => {
-    await fbRemove('votes')
+  const handleStart = ({ title, videos, voterCount, playMode, size }) => {
     const config = getConfig(size)
-    await saveTournament({
+    persist({
       title, videos, voterCount, playMode, size,
       matches: buildMatches(videos, config.total),
       currentMatch: 0, phase: 'match', nextRound: 1,
-      hostId: uid,
     })
   }
 
-  const handleAdvance = async (mi, winnerId, s1, s2) => {
+  const handleAdvance = (mi, winnerId, s1, s2) => {
     const config = getConfig(tournament.size || 16)
     const ms = [...tournament.matches]
     ms[mi] = { ...ms[mi], winner: winnerId, s1, s2 }
@@ -567,62 +476,32 @@ export default function App() {
     if (ns) {
       const wv = ms[mi].v1?.id === winnerId ? ms[mi].v1 : ms[mi].v2
       ms[ns.idx] = { ...ms[ns.idx] }
-      if (ns.slot === 0) ms[ns.idx].v1 = wv
-      else ms[ns.idx].v2 = wv
+      if (ns.slot === 0) ms[ns.idx].v1 = wv; else ms[ns.idx].v2 = wv
     }
 
     const ri = getRound(mi, config.bounds)
     const rEnd = config.bounds[ri + 1]
 
-    if (mi === config.total - 1) {
-      await saveTournament({ ...tournament, matches: ms, phase: 'result', currentMatch: mi })
-    } else if (mi + 1 === rEnd) {
-      await saveTournament({ ...tournament, matches: ms, phase: 'transition', currentMatch: mi + 1, nextRound: ri + 1 })
-    } else {
-      await saveTournament({ ...tournament, matches: ms, currentMatch: mi + 1 })
-    }
+    if (mi === config.total - 1) persist({ ...tournament, matches: ms, phase: 'result', currentMatch: mi })
+    else if (mi + 1 === rEnd) persist({ ...tournament, matches: ms, phase: 'transition', currentMatch: mi + 1, nextRound: ri + 1 })
+    else persist({ ...tournament, matches: ms, currentMatch: mi + 1 })
   }
 
-  const handleContinue = async () => await saveTournament({ ...tournament, phase: 'match' })
-
-  const handleReset = async () => {
-    await fbRemove('tournament')
-    await fbRemove('votes')
-    setTournament(null)
-  }
-
-  if (!ready) return <div className="app"><div className="loading"><div className="spinner" />Loading</div></div>
-
-  if (firebaseError) return (
-    <div className="app">
-      <div className="waiting">
-        <span className="hd-tag">Video World Cup</span>
-        <h2 style={{ fontFamily: 'var(--serif)', fontSize: 28, marginTop: 12 }}>Firebase 설정 필요</h2>
-        <div style={{ color: 'var(--tx3)', marginTop: 16, fontSize: 14, lineHeight: 1.8, maxWidth: 500, textAlign: 'left' }}>
-          <p style={{ marginBottom: 12 }}>{firebaseError}</p>
-          <p style={{ marginBottom: 8, color: 'var(--gold)', fontWeight: 600 }}>설정 순서:</p>
-          <p>1. <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" style={{ color: 'var(--gold)' }}>Firebase 콘솔</a>에서 프로젝트 생성</p>
-          <p>2. Realtime Database → 테스트 모드로 생성</p>
-          <p>3. 프로젝트 설정 → 웹앱 등록 → config 값 복사</p>
-          <p>4. GitHub에서 <code style={{ color: 'var(--gold)' }}>firebaseConfig.js</code> 파일을 열고 값 교체</p>
-          <p style={{ marginTop: 12, color: 'var(--tx2)' }}>자세한 가이드는 README.md를 참고하세요.</p>
-        </div>
-      </div>
-    </div>
-  )
+  const handleContinue = () => persist({ ...tournament, phase: 'match' })
+  const handleReset = () => { setTournament(null); clear() }
 
   const phase = tournament?.phase
-  const lastMatchIdx = tournament ? getConfig(tournament.size || 16).total - 1 : 14
-  const finalWinner = phase === 'result' && tournament.matches[lastMatchIdx]?.winner != null
-    ? tournament.videos.find(v => v.id === tournament.matches[lastMatchIdx].winner) : null
+  const config = tournament ? getConfig(tournament.size || 16) : null
+  const lastIdx = config ? config.total - 1 : 14
+  const finalWinner = phase === 'result' && tournament.matches[lastIdx]?.winner != null
+    ? tournament.videos.find(v => v.id === tournament.matches[lastIdx].winner) : null
 
   return (
     <div className="app">
-      {!tournament && isHost && <Setup onStart={handleStart} />}
-      {!tournament && !isHost && <Waiting />}
-      {phase === 'match' && <MatchScreen tournament={tournament} uid={uid} isHost={isHost} onAdvance={handleAdvance} onReset={handleReset} />}
-      {phase === 'transition' && <Transition tournament={tournament} isHost={isHost} onContinue={handleContinue} />}
-      {phase === 'result' && finalWinner && <Result winner={finalWinner} tournament={tournament} isHost={isHost} onReset={handleReset} />}
+      {!tournament && <Setup onStart={handleStart} />}
+      {phase === 'match' && <MatchScreen tournament={tournament} onAdvance={handleAdvance} onReset={handleReset} />}
+      {phase === 'transition' && <Transition tournament={tournament} onContinue={handleContinue} />}
+      {phase === 'result' && finalWinner && <Result winner={finalWinner} tournament={tournament} onReset={handleReset} />}
     </div>
   )
 }
