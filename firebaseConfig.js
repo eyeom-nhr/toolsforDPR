@@ -16,5 +16,19 @@ const firebaseConfig = {
   appId: "여기에-앱ID"
 }
 
-const app = initializeApp(firebaseConfig)
-export const db = getDatabase(app)
+let db = null
+let firebaseError = null
+
+// placeholder 값인지 체크
+if (firebaseConfig.apiKey.includes('여기에')) {
+  firebaseError = 'Firebase 설정이 필요합니다. firebaseConfig.js 파일에 본인 Firebase 프로젝트 값을 입력해주세요.'
+} else {
+  try {
+    const app = initializeApp(firebaseConfig)
+    db = getDatabase(app)
+  } catch (e) {
+    firebaseError = 'Firebase 초기화에 실패했습니다: ' + e.message
+  }
+}
+
+export { db, firebaseError }

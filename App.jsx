@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { db } from './firebaseConfig'
+import { db, firebaseError } from './firebaseConfig'
 import { ref, set, onValue, remove } from 'firebase/database'
 
 /* ═══════════ UTILS ═══════════ */
@@ -70,8 +70,8 @@ function getUserId() {
 }
 
 /* ═══════════ FIREBASE ═══════════ */
-const fbSet = async (path, val) => { try { await set(ref(db, path), val) } catch (e) { console.error(e) } }
-const fbRemove = async (path) => { try { await remove(ref(db, path)) } catch (e) { console.error(e) } }
+const fbSet = async (path, val) => { if (!db) return; try { await set(ref(db, path), val) } catch (e) { console.error(e) } }
+const fbRemove = async (path) => { if (!db) return; try { await remove(ref(db, path)) } catch (e) { console.error(e) } }
 
 /* ═══════════ CONFETTI ═══════════ */
 function Confetti() {
@@ -365,6 +365,7 @@ function MatchScreen({ tournament, uid, isHost, onAdvance, onReset }) {
 
   useEffect(() => {
     setRevealed(false)
+    if (!db) return
     const unsub = onValue(ref(db, `votes/match_${ci}`), snap => setVotes(snap.val() || {}))
     return () => unsub()
   }, [ci])
@@ -531,6 +532,7 @@ export default function App() {
 
   // Listen to tournament state
   useEffect(() => {
+    if (!db) { setReady(true); return }
     const unsub = onValue(ref(db, 'tournament'), snap => {
       setTournament(snap.val() || null)
       setReady(true)
@@ -590,6 +592,24 @@ export default function App() {
   }
 
   if (!ready) return <div className="app"><div className="loading"><div className="spinner" />Loading</div></div>
+
+  if (firebaseError) return (
+    <div className="app">
+      <div className="waiting">
+        <span className="hd-tag">Video World Cup</span>
+        <h2 style={{ fontFamily: 'var(--serif)', fontSize: 28, marginTop: 12 }}>Firebase 설정 필요</h2>
+        <div style={{ color: 'var(--tx3)', marginTop: 16, fontSize: 14, lineHeight: 1.8, maxWidth: 500, textAlign: 'left' }}>
+          <p style={{ marginBottom: 12 }}>{firebaseError}</p>
+          <p style={{ marginBottom: 8, color: 'var(--gold)', fontWeight: 600 }}>설정 순서:</p>
+          <p>1. <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" style={{ color: 'var(--gold)' }}>Firebase 콘솔</a>에서 프로젝트 생성</p>
+          <p>2. Realtime Database → 테스트 모드로 생성</p>
+          <p>3. 프로젝트 설정 → 웹앱 등록 → config 값 복사</p>
+          <p>4. GitHub에서 <code style={{ color: 'var(--gold)' }}>firebaseConfig.js</code> 파일을 열고 값 교체</p>
+          <p style={{ marginTop: 12, color: 'var(--tx2)' }}>자세한 가이드는 README.md를 참고하세요.</p>
+        </div>
+      </div>
+    </div>
+  )
 
   const phase = tournament?.phase
   const lastMatchIdx = tournament ? getConfig(tournament.size || 16).total - 1 : 14
