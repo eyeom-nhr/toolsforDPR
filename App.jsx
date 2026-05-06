@@ -50,8 +50,82 @@ function buildMatches(vids, totalMatches) {
 /* ═══════════ PERSISTENCE ═══════════ */
 const LS = 'vwc'
 const save = (t) => { try { localStorage.setItem(LS, JSON.stringify(t)) } catch {} }
-const load = () => { try { const s = localStorage.getItem(LS); return s ? JSON.parse(s) : null } catch { return null } }
 const clear = () => { try { localStorage.removeItem(LS) } catch {} }
+function load() {
+  try {
+    const s = localStorage.getItem(LS)
+    if (!s) return null
+    const t = JSON.parse(s)
+    if (!t || !t.phase || !t.matches || !t.videos) { clear(); return null }
+    return t
+  } catch { clear(); return null }
+}
+
+/* ═══════════ URL SHARE ═══════════ */
+function encodeSetup(setup) {
+  // compact: only essential fields, short keys
+  const data = {
+    t: setup.title,
+    s: setup.size,
+    v: setup.voterCount,
+    p: setup.playMode,
+    vs: setup.videos.map(v => {
+      const o = { u: v.url, t: v.title }
+      if (v.artist) o.a = v.artist
+      if (v.desc) o.d = v.desc
+      if (v.rec) o.r = v.rec
+      return o
+    })
+  }
+  return btoa(unescape(encodeURIComponent(JSON.stringify(data))))
+}
+
+function decodeSetup(hash) {
+  try {
+    const json = decodeURIComponent(escape(atob(hash)))
+    const data = JSON.parse(json)
+    return {
+      title: data.t,
+      size: data.s,
+      voterCount: data.v,
+      playMode: data.p,
+      videos: data.vs.map((v, i) => ({
+        id: i, url: v.u, title: v.t, artist: v.a || '', desc: v.d || '', rec: v.r || '',
+        videoId: ytId(v.u),
+      }))
+    }
+  } catch { return null }
+}
+
+function getShareUrl(setup) {
+  return window.location.origin + window.location.pathname + '#' + encodeSetup(setup)
+}
+
+/* ═══════════ SHARE BANNER ═══════════ */
+function ShareBanner({ tournament }) {
+  const [copied, setCopied] = useState(false)
+  const link = getShareUrl(tournament)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { prompt('이 링크를 복사하세요:', link) }
+  }
+
+  return (
+    <div className="share-banner">
+      <div className="share-top">
+        <span className="share-label">시연용 링크</span>
+        <button className="btn btn-gold btn-sm" onClick={copy}>
+          {copied ? '복사 완료!' : '링크 복사'}
+        </button>
+      </div>
+      <p className="share-desc">이 링크를 공유하면 누구나 같은 월드컵을 플레이할 수 있습니다.</p>
+    </div>
+  )
+}
 
 /* ═══════════ CONFETTI ═══════════ */
 function Confetti() {
@@ -208,6 +282,15 @@ function Setup({ onStart }) {
         </div>
       </div>
 
+      {/* column headers */}
+      <div className="entry-header">
+        <div />
+        <div className="entry-header-fields">
+          <span>URL</span><span>제목</span><span>아티스트</span><span>소개</span><span>추천인</span>
+        </div>
+        <span style={{ fontSize: 10, color: 'var(--tx3)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600, textAlign: 'center' }}>미리보기</span>
+      </div>
+
       <div className="entry-list">
         {visible.map((e, i) => {
           const vid = ytId(e.url)
@@ -215,11 +298,11 @@ function Setup({ onStart }) {
             <div className={`entry ${vid && e.title ? 'is-filled' : ''}`} key={i}>
               <span className="entry-num">{String(i + 1).padStart(2, '0')}</span>
               <div className="entry-fields">
-                <input placeholder="YouTube URL" value={e.url} onChange={ev => upd(i, 'url', ev.target.value)} />
-                <input placeholder="제목 *" value={e.title} onChange={ev => upd(i, 'title', ev.target.value)} />
-                <input placeholder="아티스트" value={e.artist} onChange={ev => upd(i, 'artist', ev.target.value)} />
-                <input placeholder="한줄 소개" value={e.desc} onChange={ev => upd(i, 'desc', ev.target.value)} />
-                <input className="entry-rec" placeholder="추천인" value={e.rec} onChange={ev => upd(i, 'rec', ev.target.value)} />
+                <input placeholder="youtube.com/..." value={e.url} onChange={ev => upd(i, 'url', ev.target.value)} />
+                <input placeholder="필수" value={e.title} onChange={ev => upd(i, 'title', ev.target.value)} />
+                <input placeholder="선택" value={e.artist} onChange={ev => upd(i, 'artist', ev.target.value)} />
+                <input placeholder="선택" value={e.desc} onChange={ev => upd(i, 'desc', ev.target.value)} />
+                <input className="entry-rec" placeholder="선택" value={e.rec} onChange={ev => upd(i, 'rec', ev.target.value)} />
               </div>
               <div className="entry-thumb">
                 {vid ? <img src={thumb(vid)} alt="" /> : <span>—</span>}
@@ -352,6 +435,8 @@ function MatchScreen({ tournament, onAdvance, onReset }) {
         <button className="hd-reset" onClick={() => setConfirmReset(true)}>Exit</button>
       </header>
 
+      <ShareBanner tournament={tournament} />
+
       <div className="round-hd">
         <span className="round-label">Round</span>
         <h2 className="round-name">{config.rounds[ri]}</h2>
@@ -408,18 +493,25 @@ function MatchScreen({ tournament, onAdvance, onReset }) {
 }
 
 /* ═══════════ TRANSITION ═══════════ */
-function Transition({ tournament, onContinue }) {
+function Transition({ tournament, onContinue, onReset }) {
   const config = getConfig(tournament.size || 16)
   const nr = tournament.nextRound || 1
+  const [confirmReset, setConfirmReset] = useState(false)
+
   return (
     <div>
       <div className="trans">
+        <button className="hd-reset" style={{ position: 'absolute', top: 24, right: 24 }}
+          onClick={() => setConfirmReset(true)}>Exit</button>
         <span className="trans-label">Next Round</span>
         <h2 className="trans-name">{config.rounds[nr]}</h2>
         <button className="btn btn-gold btn-lg" onClick={onContinue}>Continue →</button>
       </div>
       <hr className="rule" />
       <Bracket matches={tournament.matches} videos={tournament.videos} config={config} />
+      {confirmReset && (
+        <Modal message="월드컵을 초기화할까요?" onConfirm={() => { setConfirmReset(false); onReset() }} onCancel={() => setConfirmReset(false)} />
+      )}
     </div>
   )
 }
@@ -454,7 +546,27 @@ function Result({ winner, tournament, onReset }) {
    APP
    ═══════════════════════════════════ */
 export default function App() {
-  const [tournament, setTournament] = useState(() => load())
+  const [tournament, setTournament] = useState(() => {
+    // Priority 1: URL hash (shared link)
+    const hash = window.location.hash.slice(1)
+    if (hash) {
+      const setup = decodeSetup(hash)
+      if (setup) {
+        // Clear hash so refresh uses localStorage instead of resetting
+        history.replaceState(null, '', window.location.pathname)
+        const config = getConfig(setup.size)
+        const t = {
+          ...setup,
+          matches: buildMatches(setup.videos, config.total),
+          currentMatch: 0, phase: 'match', nextRound: 1,
+        }
+        save(t)
+        return t
+      }
+    }
+    // Priority 2: localStorage (resume)
+    return load()
+  })
 
   const persist = (t) => { setTournament(t); save(t) }
 
@@ -488,7 +600,12 @@ export default function App() {
   }
 
   const handleContinue = () => persist({ ...tournament, phase: 'match' })
-  const handleReset = () => { setTournament(null); clear() }
+  const handleReset = () => {
+    setTournament(null)
+    clear()
+    // clear URL hash
+    if (window.location.hash) history.replaceState(null, '', window.location.pathname)
+  }
 
   const phase = tournament?.phase
   const config = tournament ? getConfig(tournament.size || 16) : null
@@ -500,7 +617,7 @@ export default function App() {
     <div className="app">
       {!tournament && <Setup onStart={handleStart} />}
       {phase === 'match' && <MatchScreen tournament={tournament} onAdvance={handleAdvance} onReset={handleReset} />}
-      {phase === 'transition' && <Transition tournament={tournament} onContinue={handleContinue} />}
+      {phase === 'transition' && <Transition tournament={tournament} onContinue={handleContinue} onReset={handleReset} />}
       {phase === 'result' && finalWinner && <Result winner={finalWinner} tournament={tournament} onReset={handleReset} />}
     </div>
   )
