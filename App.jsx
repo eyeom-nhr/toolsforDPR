@@ -167,15 +167,16 @@ function BulkModal({ onApply, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box modal-wide" onClick={e => e.stopPropagation()}>
         <h3 className="modal-title">한번에 붙여넣기</h3>
-        <p className="modal-hint">한 줄에 하나씩: URL | 제목 | 아티스트 | 소개 | 추천인</p>
+        <p className="modal-hint">한 줄에 하나씩: URL / 제목 / 아티스트 / 소개 / 추천인</p>
+        <p className="modal-hint" style={{ marginTop: -8 }}>URL만 넣어도 됩니다. 나머지는 나중에 채울 수 있어요.</p>
         <textarea className="modal-textarea" value={text} onChange={e => setText(e.target.value)}
-          placeholder={"https://youtube.com/watch?v=abc | Bohemian Rhapsody | Queen | 기타 솔로 | 홍길동\nhttps://youtu.be/xyz | Hotel California | Eagles"} />
+          placeholder={"https://youtube.com/watch?v=abc / Bohemian Rhapsody / Queen / 기타 솔로 / 홍길동\nhttps://youtu.be/xyz / Hotel California / Eagles\nhttps://youtu.be/123"} />
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={onClose}>취소</button>
           <button className="btn btn-gold" onClick={() => {
             const lines = text.trim().split('\n').filter(Boolean)
             onApply(lines.map(l => {
-              const p = l.split('|').map(s => s.trim())
+              const p = l.split(' / ').map(s => s.trim())
               return { url: p[0]||'', title: p[1]||'', artist: p[2]||'', desc: p[3]||'', rec: p[4]||'' }
             }))
           }}>적용</button>
@@ -418,6 +419,17 @@ function MatchScreen({ tournament, onAdvance, onReset }) {
     if (side === 1) setS1(p => p + 1); else setS2(p => p + 1)
     setTimeout(() => { setJustVoted(null); setVoteLock(false) }, voterCount > 1 ? 900 : 200)
   }
+
+  // keyboard shortcuts: ← for left, → for right
+  useEffect(() => {
+    const handler = (e) => {
+      if (revealed || voteLock || allIn) return
+      if (e.key === 'ArrowLeft' || e.key === '1') castVote(1)
+      if (e.key === 'ArrowRight' || e.key === '2') castVote(2)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  })
 
   const isTie = revealed && s1 === s2
   const winner = s1 > s2 ? 1 : s1 < s2 ? 2 : null
